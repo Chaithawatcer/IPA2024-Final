@@ -1,106 +1,73 @@
-import json
+# restconf_final.py
 import requests
-requests.packages.urllib3.disable_warnings()
+from requests.auth import HTTPBasicAuth
 
-# Router IP Address is 10.0.15.181-184
-api_url = "<!!!REPLACEME with URL of RESTCONF Configuration API!!!>"
+class RestconfClient:
+    def __init__(self, host, username, password):
+        self.base = f"https://{host}/restconf/data"
+        self.state = f"https://{host}/restconf/data"
+        self.auth = HTTPBasicAuth(username, password)
+        self.verify = False  # lab มักใช้ self-signed cert
+        self.headers = {
+            "Content-Type": "application/yang-data+json",
+            "Accept": "application/yang-data+json"
+        }
 
-# the RESTCONF HTTP headers, including the Accept and Content-Type
-# Two YANG data formats (JSON and XML) work with RESTCONF 
-headers = <!!!REPLACEME with Accept and Content-Type information headers!!!>
-basicauth = ("admin", "cisco")
+    def _if_path(self, ifname):
+        # ietf-interfaces:interfaces/interface={name}
+        return f"{self.base}/ietf-interfaces:interfaces/interface={ifname}"
 
+    def interface_exists(self, ifname):
+        r = requests.get(self._if_path(ifname), auth=self.auth, headers=self.headers, verify=self.verify, timeout=10)
+        return r.status_code == 200
 
-def create():
-    yangConfig = <!!!REPLACEME with YANG data!!!> 
+    def create_loopback(self, ifname, ip_cidr):
+        # ip_cidr: "172.x.y.1/24"
+        ip, prefix = ip_cidr.split("/")
+        body = {
+            "ietf-interfaces:interface": {
+                "name": ifname,
+                "type": "iana-if-type:softwareLoopback",
+                "enabled": True,
+                "ietf-ip:ipv4": {
+                    "address": [
+                        {"ip": ip, "netmask": self._prefix_to_netmask(int(prefix))}
+                    ]
+                }
+            }
+        }
+        r = requests.put(self._if_path(ifname), json=body, auth=self.auth,
+                         headers=self.headers, verify=self.verify, timeout=15)
+        return r.status_code in (200,201,204)
 
-    resp = requests.<!!!REPLACEME with the proper HTTP Method!!!>(
-        <!!!REPLACEME with URL!!!>, 
-        data=json.dumps(<!!!REPLACEME with yangConfig!!!>), 
-        auth=basicauth, 
-        headers=<!!!REPLACEME with HTTP Header!!!>, 
-        verify=False
-        )
+    def delete_loopback(self, ifname):
+        r = requests.delete(self._if_path(ifname), auth=self.auth, headers=self.headers, verify=self.verify, timeout=10)
+        return r.status_code in (200,204)
 
-    if(resp.status_code >= 200 and resp.status_code <= 299):
-        print("STATUS OK: {}".format(resp.status_code))
-        return "<!!!REPLACEME with proper message!!!>"
-    else:
-        print('Error. Status Code: {}'.format(resp.status_code))
+    def set_enabled(self, ifname, enabled: bool):
+        body = {"ietf-interfaces:interface": {"enabled": enabled}}
+        r = requests.patch(self._if_path(ifname), json=body, auth=self.auth,
+                           headers=self.headers, verify=self.verify, timeout=10)
+        return r.status_code in (200,204)
 
+    def get_admin_oper_status(self, ifname):
+        # interfaces-state
+        url = f"{self.state}/ietf-interfaces:interfaces-state/interface={ifname}"
+        r = requests.get(url, auth=self.auth, headers=self.headers, verify=self.verify, timeout=10)
+        if r.status_code != 200:
+            # ถ้า state path ไม่เจอ ลอง fallback อ่าน config enabled
+            # แล้ววัด oper จาก presence (simple heuristic)
+            cfg = requests.get(self._if_path(ifname), auth=self.auth, headers=self.headers, verify=self.verify, timeout=10)
+            if cfg.ok:
+                enabled = cfg.json().get("ietf-interfaces:interface", {}).get("enabled", False)
+                return ("up" if enabled else "down", "down")
+            return "down","down"
+        data = r.json().get("ietf-interfaces:interface", {})
+        admin = data.get("admin-status", "down")
+        oper  = data.get("oper-status", "down")
+        return admin, oper
 
-def delete():
-    resp = requests.<!!!REPLACEME with the proper HTTP Method!!!>(
-        <!!!REPLACEME with URL!!!>, 
-        auth=basicauth, 
-        headers=<!!!REPLACEME with HTTP Header!!!>, 
-        verify=False
-        )
-
-    if(resp.status_code >= 200 and resp.status_code <= 299):
-        print("STATUS OK: {}".format(resp.status_code))
-        return "<!!!REPLACEME with proper message!!!>"
-    else:
-        print('Error. Status Code: {}'.format(resp.status_code))
-
-
-def enable():
-    yangConfig = <!!!REPLACEME with YANG data!!!>
-
-    resp = requests.<!!!REPLACEME with the proper HTTP Method!!!>(
-        <!!!REPLACEME with URL!!!>, 
-        data=json.dumps(<!!!REPLACEME with yangConfig!!!>), 
-        auth=basicauth, 
-        headers=<!!!REPLACEME with HTTP Header!!!>, 
-        verify=False
-        )
-
-    if(resp.status_code >= 200 and resp.status_code <= 299):
-        print("STATUS OK: {}".format(resp.status_code))
-        return "<!!!REPLACEME with proper message!!!>"
-    else:
-        print('Error. Status Code: {}'.format(resp.status_code))
-
-
-def disable():
-    yangConfig = <!!!REPLACEME with YANG data!!!>
-
-    resp = requests.<!!!REPLACEME with the proper HTTP Method!!!>(
-        <!!!REPLACEME with URL!!!>, 
-        data=json.dumps(<!!!REPLACEME with yangConfig!!!>), 
-        auth=basicauth, 
-        headers=<!!!REPLACEME with HTTP Header!!!>, 
-        verify=False
-        )
-
-    if(resp.status_code >= 200 and resp.status_code <= 299):
-        print("STATUS OK: {}".format(resp.status_code))
-        return "<!!!REPLACEME with proper message!!!>"
-    else:
-        print('Error. Status Code: {}'.format(resp.status_code))
-
-
-def status():
-    api_url_status = "<!!!REPLACEME with URL of RESTCONF Operational API!!!>"
-
-    resp = requests.<!!!REPLACEME with the proper HTTP Method!!!>(
-        <!!!REPLACEME with URL!!!>, 
-        auth=basicauth, 
-        headers=<!!!REPLACEME with HTTP Header!!!>, 
-        verify=False
-        )
-
-    if(resp.status_code >= 200 and resp.status_code <= 299):
-        print("STATUS OK: {}".format(resp.status_code))
-        response_json = resp.json()
-        admin_status = <!!!REPLACEME!!!>
-        oper_status = <!!!REPLACEME!!!>
-        if admin_status == 'up' and oper_status == 'up':
-            return "<!!!REPLACEME with proper message!!!>"
-        elif admin_status == 'down' and oper_status == 'down':
-            return "<!!!REPLACEME with proper message!!!>"
-    elif(resp.status_code == 404):
-        print("STATUS NOT FOUND: {}".format(resp.status_code))
-        return "<!!!REPLACEME with proper message!!!>"
-    else:
-        print('Error. Status Code: {}'.format(resp.status_code))
+    @staticmethod
+    def _prefix_to_netmask(p):
+        v = (0xffffffff << (32 - p)) & 0xffffffff
+        return ".".join(str((v >> i) & 0xff) for i in [24,16,8,0])

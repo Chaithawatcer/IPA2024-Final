@@ -1,0 +1,5 @@
+requests==2.32.3
+python-dotenv==1.0.1
+ncclient==0.6.15
+netmiko==4.4.0
+textfsm==1.1.3

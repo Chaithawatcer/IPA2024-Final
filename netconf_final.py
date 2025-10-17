@@ -1,88 +1,112 @@
+# netconf_final.py
 from ncclient import manager
-import xmltodict
+from lxml import etree
 
-m = manager.connect(
-    host="<!!!REPLACEME with router IP address!!!>",
-    port=<!!!REPLACEME with NETCONF Port number!!!>,
-    username="admin",
-    password="cisco",
-    hostkey_verify=False
-    )
+IF_FILTER = """
+<filter xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <interfaces xmlns="urn:ietf:params:xml:ns:yang:ietf-interfaces">
+    <interface>
+      <name>{IFNAME}</name>
+    </interface>
+  </interfaces>
+</filter>
+"""
 
-def create():
-    netconf_config = """<!!!REPLACEME with YANG data!!!>"""
+STATE_FILTER = """
+<filter xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <interfaces-state xmlns="urn:ietf:params:xml:ns:yang:ietf-interfaces">
+    <interface>
+      <name>{IFNAME}</name>
+    </interface>
+  </interfaces-state>
+</filter>
+"""
 
-    try:
-        netconf_reply = netconf_edit_config(netconf_config)
-        xml_data = netconf_reply.xml
-        print(xml_data)
-        if '<ok/>' in xml_data:
-            return "<!!!REPLACEME with proper message!!!>"
-    except:
-        print("Error!")
+class NetconfClient:
+    def __init__(self, host, username, password):
+        self.host = host
+        self.username = username
+        self.password = password
 
+    def _connect(self):
+        return manager.connect(
+            host=self.host, port=830, username=self.username, password=self.password,
+            hostkey_verify=False, look_for_keys=False, allow_agent=False, timeout=15
+        )
 
-def delete():
-    netconf_config = """<!!!REPLACEME with YANG data!!!>"""
+    def interface_exists(self, ifname):
+        with self._connect() as m:
+            f = IF_FILTER.format(IFNAME=ifname)
+            r = m.get(f)
+            return ifname in r.xml
 
-    try:
-        netconf_reply = netconf_edit_config(netconf_config)
-        xml_data = netconf_reply.xml
-        print(xml_data)
-        if '<ok/>' in xml_data:
-            return "<!!!REPLACEME with proper message!!!>"
-    except:
-        print("Error!")
+    def create_loopback(self, ifname, ip_cidr):
+        ip, prefix = ip_cidr.split("/")
+        netmask = self._prefix_to_netmask(int(prefix))
+        config = f"""
+<config>
+  <interfaces xmlns="urn:ietf:params:xml:ns:yang:ietf-interfaces">
+    <interface>
+      <name>{ifname}</name>
+      <type xmlns:ianaift="urn:ietf:params:xml:ns:yang:iana-if-type">ianaift:softwareLoopback</type>
+      <enabled>true</enabled>
+      <ipv4 xmlns="urn:ietf:params:xml:ns:yang:ietf-ip">
+        <address>
+          <ip>{ip}</ip>
+          <netmask>{netmask}</netmask>
+        </address>
+      </ipv4>
+    </interface>
+  </interfaces>
+</config>
+"""
+        with self._connect() as m:
+            r = m.edit_config(target="running", config=config)
+            return "<ok/>" in r.xml
 
+    def delete_loopback(self, ifname):
+        config = f"""
+<config>
+  <interfaces xmlns="urn:ietf:params:xml:ns:yang:ietf-interfaces">
+    <interface operation="delete">
+      <name>{ifname}</name>
+    </interface>
+  </interfaces>
+</config>
+"""
+        with self._connect() as m:
+            r = m.edit_config(target="running", config=config)
+            return "<ok/>" in r.xml
 
-def enable():
-    netconf_config = """<!!!REPLACEME with YANG data!!!>"""
+    def set_enabled(self, ifname, enabled: bool):
+        val = "true" if enabled else "false"
+        config = f"""
+<config>
+  <interfaces xmlns="urn:ietf:params:xml:ns:yang:ietf-interfaces">
+    <interface>
+      <name>{ifname}</name>
+      <enabled>{val}</enabled>
+    </interface>
+  </interfaces>
+</config>
+"""
+        with self._connect() as m:
+            r = m.edit_config(target="running", config=config)
+            return "<ok/>" in r.xml
 
-    try:
-        netconf_reply = netconf_edit_config(netconf_config)
-        xml_data = netconf_reply.xml
-        print(xml_data)
-        if '<ok/>' in xml_data:
-            return "<!!!REPLACEME with proper message!!!>"
-    except:
-        print("Error!")
+    def get_admin_oper_status(self, ifname):
+        with self._connect() as m:
+            f = STATE_FILTER.format(IFNAME=ifname)
+            r = m.get(f)
+            xml = etree.fromstring(r.xml.encode())
+            ns = {"if": "urn:ietf:params:xml:ns:yang:ietf-interfaces"}
+            admin = xml.find(".//if:admin-status", ns)
+            oper  = xml.find(".//if:oper-status", ns)
+            a = admin.text if admin is not None else "down"
+            o = oper.text if oper is not None else "down"
+            return a, o
 
-
-def disable():
-    netconf_config = """<!!!REPLACEME with YANG data!!!>"""
-
-    try:
-        netconf_reply = netconf_edit_config(netconf_config)
-        xml_data = netconf_reply.xml
-        print(xml_data)
-        if '<ok/>' in xml_data:
-            return "<!!!REPLACEME with proper message!!!>"
-    except:
-        print("Error!")
-
-def netconf_edit_config(netconf_config):
-    return  m.<!!!REPLACEME with the proper Netconf operation!!!>(target="<!!!REPLACEME with NETCONF Datastore!!!>", config=<!!!REPLACEME with netconf_config!!!>)
-
-
-def status():
-    netconf_filter = """<!!!REPLACEME with YANG data!!!>"""
-
-    try:
-        # Use Netconf operational operation to get interfaces-state information
-        netconf_reply = m.<!!!REPLACEME with the proper Netconf operation!!!>(filter=<!!!REPLACEME with netconf_filter!!!>)
-        print(netconf_reply)
-        netconf_reply_dict = xmltodict.<!!!REPLACEME with the proper method!!!>(netconf_reply.xml)
-
-        # if there data return from netconf_reply_dict is not null, the operation-state of interface loopback is returned
-        if <!!!REPLACEME with the proper condition!!!>:
-            # extract admin_status and oper_status from netconf_reply_dict
-            admin_status = <!!!REPLACEME!!!>
-            oper_status = <!!!REPLACEME !!!>
-            if admin_status == 'up' and oper_status == 'up':
-                return "<!!!REPLACEME with proper message!!!>"
-            elif admin_status == 'down' and oper_status == 'down':
-                return "<!!!REPLACEME with proper message!!!>"
-        else: # no operation-state data
-            return "<!!!REPLACEME with proper message!!!>"
-    except:
-       print("Error!")
+    @staticmethod
+    def _prefix_to_netmask(p):
+        v = (0xffffffff << (32 - p)) & 0xffffffff
+        return ".".join(str((v >> i) & 0xff) for i in [24,16,8,0])
