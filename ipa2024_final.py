@@ -121,13 +121,13 @@ while True:
 
         if command == "showrun" and responseMessage == "ok":
             print("Sending show running config")
-            filename = "./backups/show_run_66070046_CSR1KV-Pod1-1.txt"
+            filename = "./backups/show_run_66070046_CSR1KV.txt"
             fileobject = open(filename, "rb")
             filetype = "text/plain"
             postData = {
                 "roomId": roomIdToGetMessages,
                 "text": "show running config",
-                "files": ("show_run_66070046_CSR1KV-Pod1-1.txt", fileobject, filetype),
+                "files": ("show_run_66070046_CSR1KV.txt", fileobject, filetype),
             }
             postData = MultipartEncoder(postData)
             HTTPHeaders = {
