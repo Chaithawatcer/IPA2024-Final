@@ -1,182 +1,160 @@
-# ipa2024_final.py
-import os
-import sys
-import json
+#######################################################################################
+# Yourname: 
+# Your student ID: 
+# Your GitHub Repo: 
+
+#######################################################################################
+# 1. Import libraries for API requests, JSON formatting, time, os, (restconf_final or netconf_final), netmiko_final, and ansible_final.
+
 import requests
+from requests_toolbelt.multipart.encoder import MultipartEncoder
+import json
+import time
+import os
+import restconf_final
+import netmiko_final
+import ansible_final
 from dotenv import load_dotenv
 
-from restconf_final import RestconfClient
-from netconf_final import NetconfClient
-from netmiko_final import get_gigabit_status_string
-from ansible_final import run_ansible_showrun_and_get_path
+#######################################################################################
+# 2. Assign the Webex access token to the variable ACCESS_TOKEN using environment variables.
 
 load_dotenv()
+ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
+print("Current token is",ACCESS_TOKEN)
+#######################################################################################
+# 3. Prepare parameters get the latest message for messages API.
 
-WEBEX_TOKEN = os.getenv("WEBEX_TOKEN")
-WEBEX_ROOM_ID = os.getenv("WEBEX_ROOM_ID")
-STUDENT_ID = os.getenv("STUDENT_ID")
-USE_RESTCONF = os.getenv("USE_RESTCONF", "true").lower() == "true"
+# Defines a variable that will hold the roomId
+roomIdToGetMessages = os.environ.get("WEBEX_ROOM_ID")
+print("Current Room ID is",roomIdToGetMessages)
+if roomIdToGetMessages is None:
+    print("Using hardcoded id instead...")
+    roomIdToGetMessages = "Y2lzY29zcGFyazovL3VybjpURUFNOnVzLXdlc3QtMl9yL1JPT00vYmQwODczMTAtNmMyNi0xMWYwLWE1MWMtNzkzZDM2ZjZjM2Zm"  # TODO: Change to Production room aka. IPA2024
 
-ROUTER_IP = os.getenv("ROUTER_IP")
-ROUTER_USERNAME = os.getenv("ROUTER_USERNAME", "admin")
-ROUTER_PASSWORD = os.getenv("ROUTER_PASSWORD", "cisco")
+while True:
+    # always add 1 second of delay to the loop to not go over a rate limit of API calls
+    time.sleep(1)
 
-def send_webex_message(text: str):
-    url = "https://webexapis.com/v1/messages"
-    headers = {"Authorization": f"Bearer {WEBEX_TOKEN}"}
-    data = {"roomId": WEBEX_ROOM_ID, "markdown": text}
-    r = requests.post(url, headers=headers, data=data, timeout=15)
-    r.raise_for_status()
+    # the Webex Teams GET parameters
+    #  "roomId" is the ID of the selected room
+    #  "max": 1  limits to get only the very last message in the room
+    getParameters = {"roomId": roomIdToGetMessages, "max": 1}
 
-def send_webex_file(filepath: str, caption: str):
-    url = "https://webexapis.com/v1/messages"
-    headers = {"Authorization": f"Bearer {WEBEX_TOKEN}"}
-    files = {"files": open(filepath, "rb")}
-    data = {"roomId": WEBEX_ROOM_ID, "text": caption}
-    r = requests.post(url, headers=headers, files=files, data=data, timeout=60)
-    r.raise_for_status()
+    # the Webex Teams HTTP header, including the Authoriztion
+    getHTTPHeader = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
 
-def last3_digits(sid: str):
-    last3 = sid[-3:].zfill(3)
-    x = int(last3[0])
-    y = int(last3[1:])
-    return x, y
+    # 4. Provide the URL to the Webex Teams messages API, and extract location from the received message.
 
-def loopback_name(sid: str):
-    return f"Loopback{sid}"
-
-def loopback_ip_cidr(sid: str):
-    x, y = last3_digits(sid)
-    return f"172.{x}.{y}.1/24"
-
-def get_driver():
-    if USE_RESTCONF:
-        return RestconfClient(ROUTER_IP, ROUTER_USERNAME, ROUTER_PASSWORD)
-    else:
-        return NetconfClient(ROUTER_IP, ROUTER_USERNAME, ROUTER_PASSWORD)
-
-def handle_l1_commands(student_id: str, command: str):
-    """
-    Part 1: create / delete / enable / disable / status
-    """
-    if student_id != STUDENT_ID:
-        return  # ignore other student IDs
-
-    drv = get_driver()
-    lname = loopback_name(student_id)
-
-    if command == "create":
-        if not drv.interface_exists(lname):
-            ip_cidr = loopback_ip_cidr(student_id)
-            ok = drv.create_loopback(lname, ip_cidr)
-            if ok:
-                send_webex_message(f"Interface {lname} is created successfully")
-            else:
-                send_webex_message(f"Cannot create: Interface {lname}")
-        else:
-            send_webex_message(f"Cannot create: Interface {lname}")
-
-    elif command == "delete":
-        if drv.interface_exists(lname):
-            ok = drv.delete_loopback(lname)
-            if ok:
-                send_webex_message(f"Interface {lname} is deleted successfully")
-            else:
-                send_webex_message(f"Cannot delete: Interface {lname}")
-        else:
-            send_webex_message(f"Cannot delete: Interface {lname}")
-
-    elif command == "enable":
-        if drv.interface_exists(lname):
-            ok = drv.set_enabled(lname, True)
-            if ok:
-                send_webex_message(f"Interface {lname} is enabled successfully")
-            else:
-                send_webex_message(f"Cannot enable: Interface {lname}")
-        else:
-            send_webex_message(f"Cannot enable: Interface {lname}")
-
-    elif command == "disable":
-        if drv.interface_exists(lname):
-            ok = drv.set_enabled(lname, False)
-            if ok:
-                send_webex_message(f"Interface {lname} is shutdowned successfully")
-            else:
-                send_webex_message(f"Cannot shutdown: Interface {lname}")
-        else:
-            send_webex_message(f"Cannot shutdown: Interface {lname}")
-
-    elif command == "status":
-        if drv.interface_exists(lname):
-            admin, oper = drv.get_admin_oper_status(lname)
-            if admin == "up" and oper == "up":
-                send_webex_message(f"Interface {lname} is enabled")
-            elif admin == "down" and oper == "down":
-                send_webex_message(f"Interface {lname} is disabled")
-            else:
-                # สถานะไม่ตรง spec เป๊ะ ๆ แสดงดิบ ๆ ไว้ช่วย debug
-                send_webex_message(f"Interface {lname}: admin={admin}, oper={oper}")
-        else:
-            send_webex_message(f"No Interface {lname}")
-
-def handle_l2_commands(student_id: str, command: str):
-    """
-    Part 2: gigabit_status / showrun
-    """
-    if student_id != STUDENT_ID:
-        return
-
-    if command == "gigabit_status":
-        # Netmiko + TextFSM
-        s = get_gigabit_status_string(
-            host=ROUTER_IP, username=ROUTER_USERNAME, password=ROUTER_PASSWORD
+    # Send a GET request to the Webex Teams messages API.
+    # - Use the GetParameters to get only the latest message.
+    # - Store the message in the "r" variable.
+    r = requests.get(
+        "https://webexapis.com/v1/messages",
+        params=getParameters,
+        headers=getHTTPHeader,
+    )
+    # verify if the retuned HTTP status code is 200/OK
+    if not r.status_code == 200:
+        raise Exception(
+            "Incorrect reply from Webex Teams API. Status code: {}".format(
+                r.status_code
+            )
         )
-        send_webex_message(s)
 
-    elif command == "showrun":
-        # เรียก ansible playbook แล้วส่งไฟล์
-        path, ok = run_ansible_showrun_and_get_path()
-        if ok and path and os.path.exists(path):
-            try:
-                send_webex_file(path, "show running-config")
-            except Exception:
-                send_webex_message("Error: Ansible (upload)")
+    # get the JSON formatted returned data
+    json_data = r.json()
+
+    # check if there are any messages in the "items" array
+    if len(json_data["items"]) == 0:
+        raise Exception("There are no messages in the room.")
+
+    # store the array of messages
+    messages = json_data["items"]
+
+    # store the text of the first message in the array
+    message = messages[0]["text"]
+    print("Received message: " + message)
+
+    # check if the text of the message starts with the magic character "/" followed by your studentID and a space and followed by a command name
+    #  e.g.  "/66070123 create"
+    if message.startswith("/66070046 "):
+
+        # extract the command
+        command = message.split("/66070046 ")[1].split(" ")[0].lower().strip()
+        print(command)
+
+        # 5. Complete the logic for each command
+
+        if command == "create":
+            responseMessage = restconf_final.create()
+        elif command == "delete":
+            responseMessage = restconf_final.delete()
+        elif command == "enable":
+            responseMessage = restconf_final.enable()
+        elif command == "disable":
+            responseMessage = restconf_final.disable()
+        elif command == "status":
+            responseMessage = restconf_final.status()
+        elif command == "gigabit_status":
+            responseMessage = netmiko_final.gigabit_status()
+        elif command == "showrun":
+            response = ansible_final.showrun()
+            responseMessage = response["msg"]
+            print(responseMessage)
         else:
-            send_webex_message("Error: Ansible")
+            responseMessage = "Error: No command or unknown command"
 
-def parse_message(msg: str):
-    # รูปแบบข้อความ: "/<studentID> <command>"
-    msg = msg.strip()
-    if not msg.startswith("/"):
-        return None, None
-    parts = msg[1:].split()
-    if len(parts) != 2:
-        return None, None
-    return parts[0], parts[1].lower()
+        # 6. Complete the code to post the message to the Webex Teams room.
 
-def main():
-    """
-    ใช้ได้ 2 แบบ:
-    1) ยัดข้อความผ่าน argv เช่น:
-       python ipa2024_final.py "/66070046 create"
-    2) อ่านจาก STDIN (เช่น webhook ต่อเข้ามา)
-    """
-    if len(sys.argv) > 1:
-        raw = sys.argv[1]
-    else:
-        raw = sys.stdin.read()
+        # The Webex Teams POST JSON data for command showrun
+        # - "roomId" is is ID of the selected room
+        # - "text": is always "show running config"
+        # - "files": is a tuple of filename, fileobject, and filetype.
 
-    sid, cmd = parse_message(raw)
-    if not sid or not cmd:
-        print("Bad command format. Use: /<studentID> <command>")
-        return
+        # the Webex Teams HTTP headers, including the Authoriztion and Content-Type
 
-    if cmd in {"create","delete","enable","disable","status"}:
-        handle_l1_commands(sid, cmd)
-    elif cmd in {"gigabit_status","showrun"}:
-        handle_l2_commands(sid, cmd)
-    else:
-        send_webex_message(f"Unknown command: {cmd}")
+        # Prepare postData and HTTPHeaders for command showrun
+        # Need to attach file if responseMessage is 'ok';
+        # Read Send a Message with Attachments Local File Attachments
+        # https://developer.webex.com/docs/basics for more detail
 
-if __name__ == "__main__":
-    main()
+        if command == "showrun" and responseMessage == "ok":
+            print("Sending show running config")
+            filename = "./backups/show_run_66070046_CSR1KV-Pod1-1.txt"
+            fileobject = open(filename, "rb")
+            filetype = "text/plain"
+            postData = {
+                "roomId": roomIdToGetMessages,
+                "text": "show running config",
+                "files": ("show_run_66070046_CSR1KV-Pod1-1.txt", fileobject, filetype),
+            }
+            postData = MultipartEncoder(postData)
+            HTTPHeaders = {
+                "Authorization": f"Bearer {ACCESS_TOKEN}",
+                "Content-Type": postData.content_type,
+            }
+        # other commands only send text, or no attached file.
+        else:
+            postData = {"roomId": roomIdToGetMessages, "text": responseMessage}
+            postData = json.dumps(postData)
+
+            # the Webex Teams HTTP headers, including the Authoriztion and Content-Type
+            HTTPHeaders = {
+                "Authorization": f"Bearer {ACCESS_TOKEN}",
+                "Content-Type": "application/json",
+            }
+
+        # Post the call to the Webex Teams message API.
+        r = requests.post(
+            "https://webexapis.com/v1/messages",
+            data=postData,
+            headers=HTTPHeaders,
+        )
+        if not r.status_code == 200:
+            print(r.text)
+            raise Exception(
+                "Incorrect reply from Webex Teams API. Status code: {}".format(
+                    r.status_code
+                )
+            )

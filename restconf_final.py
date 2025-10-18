@@ -1,73 +1,187 @@
-# restconf_final.py
+import json
 import requests
-from requests.auth import HTTPBasicAuth
+requests.packages.urllib3.disable_warnings()
 
-class RestconfClient:
-    def __init__(self, host, username, password):
-        self.base = f"https://{host}/restconf/data"
-        self.state = f"https://{host}/restconf/data"
-        self.auth = HTTPBasicAuth(username, password)
-        self.verify = False  # lab มักใช้ self-signed cert
-        self.headers = {
-            "Content-Type": "application/yang-data+json",
-            "Accept": "application/yang-data+json"
+
+api_url = "https://10.0.15.61/restconf/data" # TODO: Change to production IP address
+
+# the RESTCONF HTTP headers, including the Accept and Content-Type
+# Two YANG data formats (JSON and XML) work with RESTCONF 
+headers = {
+    "Accept": "application/yang-data+json",
+    "Content-Type": "application/yang-data+json",
+}
+basicauth = ("admin", "cisco")
+studentID = "66070046"
+
+def create():
+    yangConfig = {
+        "ietf-interfaces:interface": {
+            "name": f"Loopback{studentID}",
+            "type": "iana-if-type:softwareLoopback",
+            "enabled": True,
+            "ietf-ip:ipv4": {
+                "address": [{"ip": "192.168.46.1", "netmask": "255.255.255.0"}]
+            },
+            "ietf-ip:ipv6": {},
         }
+    }
 
-    def _if_path(self, ifname):
-        # ietf-interfaces:interfaces/interface={name}
-        return f"{self.base}/ietf-interfaces:interfaces/interface={ifname}"
+    resp = requests.put(
+        f"{api_url}/ietf-interfaces:interfaces/interface=Loopback{studentID}", 
+        data=json.dumps(yangConfig), 
+        auth=basicauth, 
+        headers=headers, 
+        verify=False
+        )
 
-    def interface_exists(self, ifname):
-        r = requests.get(self._if_path(ifname), auth=self.auth, headers=self.headers, verify=self.verify, timeout=10)
-        return r.status_code == 200
+    if(resp.status_code == 201):
+        print("STATUS OK: {}".format(resp.status_code))
+        return f"Interface loopback {studentID} is created successfully"
+    else:
+        print('Error. Status Code: {}'.format(resp.status_code))
+        return f"Cannot create: Interface loopback {studentID}"
 
-    def create_loopback(self, ifname, ip_cidr):
-        # ip_cidr: "172.x.y.1/24"
-        ip, prefix = ip_cidr.split("/")
-        body = {
-            "ietf-interfaces:interface": {
-                "name": ifname,
-                "type": "iana-if-type:softwareLoopback",
-                "enabled": True,
-                "ietf-ip:ipv4": {
-                    "address": [
-                        {"ip": ip, "netmask": self._prefix_to_netmask(int(prefix))}
-                    ]
-                }
-            }
+
+def delete():
+    resp = requests.delete(
+        f"{api_url}/ietf-interfaces:interfaces/interface=Loopback{studentID}", 
+        auth=basicauth, 
+        headers=headers, 
+        verify=False
+        )
+
+    if(resp.status_code == 204):
+        print("STATUS OK: {}".format(resp.status_code))
+        return f"Interface loopback {studentID} is deleted successfully"
+    else:
+        print('Error. Status Code: {}'.format(resp.status_code))
+        return f"Cannot delete: Interface loopback {studentID}"
+
+
+def enable():
+    yangConfig = {
+        "ietf-interfaces:interface": {
+            "name": f"Loopback{studentID}",
+            "type": "iana-if-type:softwareLoopback",
+            "enabled": True,
         }
-        r = requests.put(self._if_path(ifname), json=body, auth=self.auth,
-                         headers=self.headers, verify=self.verify, timeout=15)
-        return r.status_code in (200,201,204)
+    }
+    
 
-    def delete_loopback(self, ifname):
-        r = requests.delete(self._if_path(ifname), auth=self.auth, headers=self.headers, verify=self.verify, timeout=10)
-        return r.status_code in (200,204)
+    resp = requests.patch(
+        f"{api_url}/ietf-interfaces:interfaces/interface=Loopback{studentID}", 
+        data=json.dumps(yangConfig), 
+        auth=basicauth, 
+        headers=headers, 
+        verify=False
+        )
 
-    def set_enabled(self, ifname, enabled: bool):
-        body = {"ietf-interfaces:interface": {"enabled": enabled}}
-        r = requests.patch(self._if_path(ifname), json=body, auth=self.auth,
-                           headers=self.headers, verify=self.verify, timeout=10)
-        return r.status_code in (200,204)
+    if(resp.status_code >= 200 and resp.status_code <= 299):
+        print("STATUS OK: {}".format(resp.status_code))
+        return f"Interface loopback {studentID} is enabled successfully"
+    else:
+        print('Error. Status Code: {}'.format(resp.status_code))
+        return f"Cannot enable: Interface loopback {studentID}"
 
-    def get_admin_oper_status(self, ifname):
-        # interfaces-state
-        url = f"{self.state}/ietf-interfaces:interfaces-state/interface={ifname}"
-        r = requests.get(url, auth=self.auth, headers=self.headers, verify=self.verify, timeout=10)
-        if r.status_code != 200:
-            # ถ้า state path ไม่เจอ ลอง fallback อ่าน config enabled
-            # แล้ววัด oper จาก presence (simple heuristic)
-            cfg = requests.get(self._if_path(ifname), auth=self.auth, headers=self.headers, verify=self.verify, timeout=10)
-            if cfg.ok:
-                enabled = cfg.json().get("ietf-interfaces:interface", {}).get("enabled", False)
-                return ("up" if enabled else "down", "down")
-            return "down","down"
-        data = r.json().get("ietf-interfaces:interface", {})
-        admin = data.get("admin-status", "down")
-        oper  = data.get("oper-status", "down")
-        return admin, oper
 
-    @staticmethod
-    def _prefix_to_netmask(p):
-        v = (0xffffffff << (32 - p)) & 0xffffffff
-        return ".".join(str((v >> i) & 0xff) for i in [24,16,8,0])
+def disable():
+    yangConfig = {
+        "ietf-interfaces:interface": {
+            "name": f"Loopback{studentID}",
+            "type": "iana-if-type:softwareLoopback",
+            "enabled": False,
+        }
+    }
+
+    resp = requests.patch(
+        f"{api_url}/ietf-interfaces:interfaces/interface=Loopback{studentID}", 
+        data=json.dumps(yangConfig), 
+        auth=basicauth, 
+        headers=headers, 
+        verify=False
+        )
+
+    if(resp.status_code >= 200 and resp.status_code <= 299):
+        print("STATUS OK: {}".format(resp.status_code))
+        return f"Interface loopback {studentID} is shutdowned successfully"
+    else:
+        print('Error. Status Code: {}'.format(resp.status_code))
+        return f"Cannot shutdown: Interface loopback {studentID}"
+
+def status():
+    resp = requests.get(
+        f"{api_url}/ietf-interfaces:interfaces-state/interface=Loopback{studentID}",
+        auth=basicauth,
+        headers=headers,
+        verify=False,
+    )
+
+    if(resp.status_code >= 200 and resp.status_code <= 299):
+        print("STATUS OK: {}".format(resp.status_code))
+        response_json = resp.json()
+        admin_status = response_json["ietf-interfaces:interface"]["admin-status"]
+        oper_status = response_json["ietf-interfaces:interface"]["oper-status"]
+        if admin_status == 'up' and oper_status == 'up':
+            return f"Interface loopback {studentID} is enabled"
+        elif admin_status == 'down' and oper_status == 'down':
+            return f"Interface loopback {studentID} is disabled"
+    elif(resp.status_code == 404):
+        print("STATUS NOT FOUND: {}".format(resp.status_code))
+        return f"No Interface loopback {studentID}"
+    else:
+        print('Error. Status Code: {}'.format(resp.status_code))
+        return f"Undefined Error"
+
+def gigabit_status():
+    # api_url_status = "<!!!REPLACEME with URL of RESTCONF Operational API!!!>"
+
+    resp = requests.get(
+        f"{api_url}/ietf-interfaces:interfaces-state/interface=Loopback{studentID}",
+        auth=basicauth,
+        headers=headers,
+        verify=False,
+    )
+
+    if(resp.status_code >= 200 and resp.status_code <= 299):
+        print("STATUS OK: {}".format(resp.status_code))
+        response_json = resp.json()
+        admin_status = response_json["ietf-interfaces:interface"]["admin-status"]
+        oper_status = response_json["ietf-interfaces:interface"]["oper-status"]
+        if admin_status == 'up' and oper_status == 'up':
+            return f"Interface loopback {studentID} is enabled"
+        elif admin_status == 'down' and oper_status == 'down':
+            return f"Interface loopback {studentID} is disabled"
+    elif(resp.status_code == 404):
+        print("STATUS NOT FOUND: {}".format(resp.status_code))
+        return f"No Interface loopback {studentID}"
+    else:
+        print('Error. Status Code: {}'.format(resp.status_code))
+        return f"Undefined Error"
+    
+
+def showrun():
+    # api_url_status = "<!!!REPLACEME with URL of RESTCONF Operational API!!!>"
+
+    resp = requests.get(
+        f"{api_url}/ietf-interfaces:interfaces-state/interface=Loopback{studentID}",
+        auth=basicauth,
+        headers=headers,
+        verify=False,
+    )
+
+    if(resp.status_code >= 200 and resp.status_code <= 299):
+        print("STATUS OK: {}".format(resp.status_code))
+        response_json = resp.json()
+        admin_status = response_json["ietf-interfaces:interface"]["admin-status"]
+        oper_status = response_json["ietf-interfaces:interface"]["oper-status"]
+        if admin_status == 'up' and oper_status == 'up':
+            return f"Interface loopback {studentID} is enabled"
+        elif admin_status == 'down' and oper_status == 'down':
+            return f"Interface loopback {studentID} is disabled"
+    elif(resp.status_code == 404):
+        print("STATUS NOT FOUND: {}".format(resp.status_code))
+        return f"No Interface loopback {studentID}"
+    else:
+        print('Error. Status Code: {}'.format(resp.status_code))
+        return f"Undefined Error"

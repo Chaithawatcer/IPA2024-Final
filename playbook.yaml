@@ -1,0 +1,29 @@
+---
+- name: AUTOMATIC BACKUP OF RUNNING-CONFIG
+  hosts: CSR1kv
+  gather_facts: false
+  vars:
+    ansible_connection: ansible.netcommon.network_cli
+    ansible_network_os: cisco.ios.ios
+    ansible_become: yes
+    ansible_become_method: enable
+    ansible_command_timeout: 16
+
+    
+  tasks:
+   - name: Gather facts (ios)
+     cisco.ios.ios_facts:
+     when: ansible_network_os == 'cisco.ios.ios'
+  
+   - name: DISPLAYING THE RUNNING-CONFIG
+     ios_command:
+       commands:
+         - show running-config  
+     register: config
+     retries: 30
+     delay: 10
+ 
+   - name: SAVE OUTPUT TO ./backups/
+     copy:
+       content: "{{ config.stdout[0] }}"
+       dest: "backups/show_run_65070046_{{ ansible_net_hostname }}.txt" 
