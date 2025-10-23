@@ -21,7 +21,7 @@ def create():
             "type": "iana-if-type:softwareLoopback",
             "enabled": True,
             "ietf-ip:ipv4": {
-                "address": [{"ip": "192.168.46.1", "netmask": "255.255.255.0"}]
+                "address": [{"ip": "172.0.46.1", "netmask": "255.255.255.0"}]
             },
             "ietf-ip:ipv6": {},
         }
